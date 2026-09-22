@@ -1,0 +1,66 @@
+schema: 1
+id: com.bxi.wuji_hand
+name: Wuji 手波动
+version: 1.0.0
+api: ">=4,<5"
+enable: true
+entrypoint: null
+visibility: public
+requires:
+  - id: com.bxi.basic_actions
+    version: ">=1,<2"
+conflicts: []
+python_exports: []
+runtime_requirements:
+  python: []
+  ros: []
+  system: []
+
+events:
+  activate:
+    slot: btn_10
+    value: 13
+
+states:
+  wave:
+    factory: state:WujiHandState
+    manifest:
+      label: Wuji 手波动
+      priority: 850
+      group: Gesture
+      icon: waving_hand
+      confirm: true
+      confirm_message: 请确认灵巧手周围没有障碍物，且手部网络已连接
+
+routes:
+  - from: com.bxi.basic_actions/normal
+    event: activate
+    to: wave
+    transition: soft_switch
+  - from: wave
+    event: com.bxi.basic_actions/normal
+    to: com.bxi.basic_actions/normal
+    transition: soft_switch
+  - from: wave
+    event: com.bxi.basic_actions/zero_torque
+    to: com.bxi.basic_actions/zero_torque
+
+nodes:
+  wave_driver:
+    entrypoint: scripts/wuji_hand_wave.py
+    runtime: command
+    lifecycle: state
+    states:
+      - wave
+    runtime_requirements:
+      python:
+        - import: wuji_sdk
+        - import: numpy
+      ros: []
+      system: []
+    shutdown:
+      signal: SIGINT
+      terminate_after: 2.0
+      kill_after: 5.0
+    manifest:
+      label: Wuji 手控制进程
