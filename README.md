@@ -50,6 +50,32 @@ PY
 
 如果缺少依赖，应在实际运行 Mod 的同一个 Python 环境中安装。SDK 版本需与当前手部固件配套；不要在机器人正在运动时切换 Python 环境或升级 SDK。
 
+### 装到运行节点的那个解释器（常见坑）
+
+状态机启动 Mod 节点时用的是**控制栈自己的解释器**：ELF3 上 example 由 `ros_elf_launch.service`（`User=root`）拉起，节点即 `/usr/bin/python3`。`pip install --user` 装进某个普通用户 `~/.local` 的 SDK 对它不可见，状态机会报：
+
+```text
+Mod node 'com.bxi.wuji_hand/wave_driver' is unavailable:
+Python module 'wuji_sdk' is not importable with '/usr/bin/python3': ModuleNotFoundError: No module named 'wuji_sdk'
+```
+
+装到系统级并用同一个解释器验证：
+
+```bash
+sudo -H /usr/bin/python3 -m pip install wuji-sdk
+sudo /usr/bin/python3 -c "import wuji_sdk, numpy; print(wuji_sdk.__file__, numpy.__version__)"
+```
+
+离线环境或已有用户级安装时，可把三份目录一起复制到系统 site-packages（漏掉 `wuji_sdk.libs` 会让 `.so` 加载失败）：
+
+```bash
+SP=~/.local/lib/python3.10/site-packages
+sudo cp -r "$SP/wuji_sdk" "$SP/wuji_sdk.libs" "$SP"/wuji_sdk-*.dist-info \
+  /usr/local/lib/python3.10/dist-packages/
+```
+
+装好后必须重启 example（遥控器 Stop → Start），状态机才会重新计算节点可用性。
+
 ## 部署
 
 > [!warning] 两种部署方式互斥，只能选一种
@@ -170,6 +196,7 @@ python3 scripts/wuji_hand_wave.py \
 | --- | --- |
 | `ValueError: duplicate Mod 'com.bxi.wuji_hand'` | 同一个 Mod 被部署到了两个根目录（内置 `install/share/bxi_example_py_elf3/mods/` 与 `/opt/bxi/mods`）。按“部署”一节的检查命令确认两处都在后，删除或移走多余的一份再启动；不要靠改 `mod_paths` 绕过。 |
 | `No module named wuji_sdk` | 用运行状态机的同一个 `python3` 检查 `python3 -m pip show wuji-sdk`。 |
+| 状态机报 `Mod node 'com.bxi.wuji_hand/wave_driver' is unavailable: ... 'wuji_sdk' is not importable with '/usr/bin/python3'` | SDK 装在别的解释器/用户目录（典型是普通用户 `~/.local`，而节点以 root + `/usr/bin/python3` 运行）。按“安装 SDK”一节装到系统级，然后重启 example。 |
 | `未检测到完整的 20 个在线关节` | 检查手部供电、网络地址、内部总线和设备型号。 |
 | `在线关节不完整` | 确认 20 个 NID 都能在诊断帧中读到，不要修改列顺序来绕过检查。 |
 | `等待关节数据超时` | 检查 SDK 连接、UDP 地址和是否已有其他订阅/发布程序。 |
