@@ -234,7 +234,7 @@ python3 scripts/wuji_hand_wave.py \
 | `等待关节数据超时` | 检查 SDK 连接、UDP 地址和是否已有其他订阅/发布程序。 |
 | `关节使能超时` | 程序最多等 5 s 让 20 个关节使能。先看诊断里的 `error_code_current` / `ext_state`；若同时报不可清除故障码（如 `0x3208`），先处理该故障，不要反复重试。 |
 | `0x3208 InitCurrentCalibFailed`（不可自动清除） | 启动电流采样偏置校准失败。官方处理：先给手部断电重启（power-cycle）；复现则检查电流采样通道、ADC 通路与功率级硬件。该关节无法使能时表现为 `关节使能超时`。**不要用 `clear_fault()`/`clear_all_faults()` 硬清**：该码不可清除，电流采样偏置不合法时使能会让该关节的电流/力矩估计失真。日志成片的 `Subscription for 'joint_diagnostics' lagged N messages` 只是订阅桥滞后，可用只读脚本读 `ext_state` / `error_code_current` 把真故障和流滞后区分开。 |
-| 动作幅度过大或抖动 | 立即停止，降低 `--scale`，确认只有一个发布者并检查网络丢包。 |
+| `0x3204 InitFailed`（不可自动清除） | 初始化未完成（电流校准失败或初始化步骤超时）。**断电重启后仍复现**就不是偶发锁存：按官方 resolution 检查该关节的编码器与供电，并用 `hand.export_flash_logs()` 导出设备侧初始化诊断交厂家。 |
 | 退出后参数未恢复 | 检查进程是否被强制杀死；重新运行前手动核对 MIT 参数和力矩限制。 |
 
 ## 开发与验证
