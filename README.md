@@ -1,13 +1,6 @@
 # Wuji 手波动 Mod
 
-`com.bxi.wuji_hand` 将 `elf3-arm-02` 上验证过的 Wuji Hand 2 `wave.npy` 示例接入 ELF3 状态机。它只控制灵巧手的 20 个关节；机器人本体在该状态中保持进入状态前的最后一帧电机目标，因此当前版本适合原地短时演示，不支持边走边做手部动作。
-
-## 功能概览
-
-- 从 `com.bxi.basic_actions/normal` 进入 `Wuji 手波动` 状态。
-- 状态节点独立启动 Wuji SDK 进程，避免把手部 SDK 放进机器人控制热路径。
-- 退出状态时发送 `SIGINT`，脚本执行急停、失能、恢复 MIT 参数和力矩限制，然后断开连接。
-- 内置 150 帧、20 关节的 `assets/wave.npy`，支持幅度、播放频率和循环次数调整。
+`com.bxi.wuji_hand` 把 Wuji Hand 2 的 `wave.npy` 波动动作接入 ELF3 状态机。它只控制灵巧手的 20 个关节，机器人本体在 `wave` 状态中保持进入前的最后一帧电机目标，因此只适合原地短时演示，不支持边走边做手部动作。
 
 ## 目录结构
 
@@ -20,53 +13,30 @@ com.bxi.wuji_hand/
 └── README.md
 ```
 
-## 运行前提
+## 环境要求
 
-### ELF3 控制端
+| 项 | 要求 |
+| --- | --- |
+| ELF3 控制端 | 已部署并启用 `bxi_example_py_elf3` 状态机；`com.bxi.basic_actions`（`>=1,<2`）已加载 |
+| Python | 控制端 Python 3 能导入 `numpy` 与 `wuji_sdk`。ELF3 上 Mod 节点由 `ros_elf_launch.service`（`User=root`）以 `/usr/bin/python3` 运行，SDK 必须装到该解释器可见的位置 |
+| 灵巧手 | Wuji Hand 2，20 个关节在线、已供电；同一时间只能有一个程序发布手部关节命令 |
+| 网络 | 主机有一块网卡处在 `192.168.1.0/24`（约定主机侧 `192.168.1.100/24`），手部默认 `192.168.1.111:7447` |
 
-- 已安装并启用 `bxi_example_py_elf3` 状态机。
-- `com.bxi.basic_actions` 已加载；本 Mod 的 `requires` 会检查版本范围 `>=1,<2`。
-- 控制端使用 Python 3，且运行时能够导入 `numpy` 与 `wuji_sdk`。
-- 手部网络可达默认地址 `192.168.1.111:7447`。
+## 操作步骤
 
-### Wuji Hand 2
+按顺序执行，每步都给出验证方法。
 
-- 设备为 Wuji Hand 2，20 个关节全部在线。
-- 手部已供电，控制端与手部位于可通信网络。
-- 同一时间只能有一个程序发布手部关节命令。
+### 步骤 1：把 wuji_sdk 装到运行节点的解释器
 
-在目标设备上先检查 Python 环境：
+ELF3 上 Mod 节点由 `ros_elf_launch.service`（`User=root`）以 `/usr/bin/python3` 启动，所以 SDK 要装到系统级；`pip install --user` 装进普通用户 `~/.local` 的 SDK 对该进程不可见。
 
-```bash
-python3 -m pip show wuji-sdk numpy
-python3 - <<'PY'
-import numpy
-import wuji_sdk
-
-print("numpy:", numpy.__version__)
-print("wuji_sdk:", wuji_sdk.__file__)
-PY
-```
-
-如果缺少依赖，应在实际运行 Mod 的同一个 Python 环境中安装。SDK 版本需与当前手部固件配套；不要在机器人正在运动时切换 Python 环境或升级 SDK。
-
-### 装到运行节点的那个解释器（常见坑）
-
-状态机启动 Mod 节点时用的是**控制栈自己的解释器**：ELF3 上 example 由 `ros_elf_launch.service`（`User=root`）拉起，节点即 `/usr/bin/python3`。`pip install --user` 装进某个普通用户 `~/.local` 的 SDK 对它不可见，状态机会报：
-
-```text
-Mod node 'com.bxi.wuji_hand/wave_driver' is unavailable:
-Python module 'wuji_sdk' is not importable with '/usr/bin/python3': ModuleNotFoundError: No module named 'wuji_sdk'
-```
-
-装到系统级并用同一个解释器验证：
+联网安装：
 
 ```bash
 sudo -H /usr/bin/python3 -m pip install wuji-sdk
-sudo /usr/bin/python3 -c "import wuji_sdk, numpy; print(wuji_sdk.__file__, numpy.__version__)"
 ```
 
-离线环境或已有用户级安装时，可把三份目录一起复制到系统 site-packages（漏掉 `wuji_sdk.libs` 会让 `.so` 加载失败）：
+离线安装（已有用户级安装时，把三份目录一起复制到系统 site-packages；缺 `wuji_sdk.libs` 会导致 `.so` 加载失败）：
 
 ```bash
 SP=~/.local/lib/python3.10/site-packages
@@ -74,31 +44,29 @@ sudo cp -r "$SP/wuji_sdk" "$SP/wuji_sdk.libs" "$SP"/wuji_sdk-*.dist-info \
   /usr/local/lib/python3.10/dist-packages/
 ```
 
-装好后必须重启 example（遥控器 Stop → Start），状态机才会重新计算节点可用性。
-
-### 主机侧网络（直连手部）
-
-手部固定使用 `192.168.1.111:7447`，主机必须有一块网卡处在 `192.168.1.0/24`（约定主机侧 `192.168.1.100/24`）。网线插上、link 灯亮但网卡没 IP 一样不通：`ip route get 192.168.1.111` 会落到默认路由，SDK 扫描 `found 0 device(s)`、`connect()` 报 `Connection timeout`。
-
-临时配置（重启失效）：
+验证（必须用 root + `/usr/bin/python3`）：
 
 ```bash
-sudo ip addr add 192.168.1.100/24 dev <直连网口>
+sudo /usr/bin/python3 -c "import wuji_sdk, numpy; print(wuji_sdk.__file__, numpy.__version__)"
 ```
 
-持久配置（NetworkManager；`ipv4.never-default yes` 保证不顶掉默认路由）：
+### 步骤 2：给直连网口配置手部网段
 
 ```bash
+# 临时（重启失效）
+sudo ip addr add 192.168.1.100/24 dev <直连网口>
+
+# 持久（NetworkManager；never-default 保证不顶掉默认路由）
 sudo nmcli con add type ethernet ifname <直连网口> con-name bxi-hand \
   ipv4.method manual ipv4.addresses 192.168.1.100/24 \
   ipv4.never-default yes ipv6.method disabled
 sudo nmcli con up bxi-hand
 ```
 
-验证（扫描只发现设备，不使能关节）：
+验证路由、连通性和设备发现（扫描只发现设备，不使能关节）：
 
 ```bash
-ip route get 192.168.1.111        # 应指向直连网口
+ip route get 192.168.1.111          # 应指向直连网口
 ping -c 2 192.168.1.111
 python3 - <<'PY'
 from wuji_sdk import SdkManager
@@ -107,100 +75,138 @@ for d in SdkManager.instance().scan():
 PY
 ```
 
-## 部署
+期望输出形如 `WH2KA01260807012 192.168.1.111:7447 TransportType.Udp DeviceType.WujiHand2`。
 
-> [!warning] 两种部署方式互斥，只能选一种
-> 同一个 Mod 不能同时存在于两个 Mod 根目录。工作区内置根目录（`src/bxi_example_py_elf3/mods/`，安装后为 `install/share/bxi_example_py_elf3/mods/`）和外部根目录（状态机配置 `mod_paths`，默认示例 `/opt/bxi/mods`）各放一份时，状态机启动会直接失败，控制进程随之退出：
->
-> ```text
-> ValueError: duplicate Mod 'com.bxi.wuji_hand': <install>/share/bxi_example_py_elf3/mods/com.bxi.wuji_hand and /opt/bxi/mods/com.bxi.wuji_hand
-> ```
->
-> 部署前先检查另一处是否已有同名目录，只保留一份：
->
-> ```bash
-> ls -d ./src/bxi_example_py_elf3/mods/com.bxi.wuji_hand \
->       ./install/share/bxi_example_py_elf3/mods/com.bxi.wuji_hand \
->       /opt/bxi/mods/com.bxi.wuji_hand 2>/dev/null
-> ```
+### 步骤 3：部署 Mod（两种方式二选一）
 
-### 作为外部 Mod 部署
+同一个 Mod 只能存在于一个 Mod 根目录。部署前先确认另一处没有同名目录：
 
-将仓库目录放到状态机配置中的 Mod 根目录（默认示例为 `/opt/bxi/mods`）：
+```bash
+ls -d ./src/bxi_example_py_elf3/mods/com.bxi.wuji_hand \
+      ./install/share/bxi_example_py_elf3/mods/com.bxi.wuji_hand \
+      /opt/bxi/mods/com.bxi.wuji_hand 2>/dev/null
+```
+
+**方式 A：外部 Mod 根目录**（不改工作区，适合独立升级）
 
 ```bash
 sudo mkdir -p /opt/bxi/mods
 sudo git clone git@github.com:lixinweijy/com.bxi.wuji_hand.git \
   /opt/bxi/mods/com.bxi.wuji_hand
-```
 
-已有目录更新时使用快进更新：
-
-```bash
+# 之后更新
 sudo git -C /opt/bxi/mods/com.bxi.wuji_hand pull --ff-only
 ```
 
-确认以下文件存在：
+**方式 B：集成到 `bxi_example_py_elf3` 源码**
 
 ```bash
-test -f /opt/bxi/mods/com.bxi.wuji_hand/mod.yaml
-test -f /opt/bxi/mods/com.bxi.wuji_hand/assets/wave.npy
-```
-
-### 集成到 `bxi_example_py_elf3` 源码
-
-把整个 `com.bxi.wuji_hand` 目录放入包的 `mods/` 目录，然后重新构建安装空间（**不要再按上一节 clone 到 `/opt/bxi/mods`**）：
-
-```bash
-colcon build --packages-select bxi_example_py_elf3 --symlink-install
+cp -r com.bxi.wuji_hand src/bxi_example_py_elf3/mods/
+colcon build --merge-install --packages-select bxi_example_py_elf3
 source install/setup.bash
 ```
 
-不要只复制 `scripts/wuji_hand_wave.py`；`mod.yaml`、`state.py` 和 `assets/wave.npy` 也必须保留，否则状态机无法发现完整 Mod。
+两种方式都要保留 `mod.yaml`、`state.py`、`scripts/wuji_hand_wave.py`、`assets/wave.npy` 四个文件，只复制播放器脚本状态机无法发现完整 Mod。
 
-## 遥控器操作
+验证文件齐全（路径按所选方式替换）：
+
+```bash
+M=/opt/bxi/mods/com.bxi.wuji_hand
+test -f $M/mod.yaml && test -f $M/state.py \
+  && test -f $M/scripts/wuji_hand_wave.py && test -f $M/assets/wave.npy \
+  && echo "Mod 文件齐全"
+```
+
+### 步骤 4：重启 example 让状态机重新加载
+
+用遥控器 **Stop → Start**（或 `sudo systemctl restart ros_elf_launch.service`）。Mod 可用性在加载时计算，不会热更新。
+
+验证启动日志（`/var/log/bxi_log/<时间>_elf.log`）里出现：
+
+```text
+[fw.controller]: loaded 5 Mods, 0 unavailable, 0 disabled, ...
+[com.bxi.wuji_hand]: loaded v1.0.0: .../mods/com.bxi.wuji_hand; requires=com.bxi.basic_actions
+```
+
+### 步骤 5：上电后做只读自检
+
+连接、订阅诊断，不使能、不发布命令：
+
+```bash
+cd <Mod 目录>
+python3 - <<'PY'
+import time
+from wuji_sdk import SdkManager
+
+m = SdkManager.instance()
+hand = m.connect(address="192.168.1.111:7447", device_name="wuji_diag")
+sub = None
+try:
+    print("online joints:", hand.online_joints_count().get())
+    sub = hand.joint_diagnostics().subscribe()
+    deadline = time.monotonic() + 5
+    frame = None
+    while time.monotonic() < deadline:
+        frame = sub.recv()
+        if frame is not None and len(frame.joints) == 20:
+            break
+        time.sleep(0.01)
+    for j in sorted(frame.joints, key=lambda x: x.nid):
+        code = j.error_code_current
+        info = hand.describe_error(code) if code else None
+        tag = "" if info is None else " | %s/%s" % (info["severity"], info["clear_policy"])
+        print("nid=%2d ext_state=%s vbus=%.1fV err=0x%04X%s"
+              % (j.nid, getattr(j.status_word, "ext_state", None), j.vbus_v_fb, code, tag))
+finally:
+    if sub is not None:
+        sub.close()
+    m.disconnect(device_name="wuji_diag")
+PY
+```
+
+期望：`online joints: 20`，每个关节 `err=0x0000`（个别 `0x0006 BusFrameLossHigh` 是可自动清除的总线告警，可忽略），**没有** `ext_state=3` 的关节。自检不通过时先处理手部侧再继续，不要进入运动步骤。
+
+### 步骤 6：进入 wave 状态操作
 
 | 操作 | 事件 | 状态机行为 |
 | --- | --- | --- |
-| `LB + RB + A` | `btn_10=13` | `normal` → `com.bxi.wuji_hand/wave` |
+| `LB + RB + A` | `btn_10=13` | `com.bxi.basic_actions/normal` → `com.bxi.wuji_hand/wave` |
 | 普通状态键 | `btn_1=1` | `wave` → `com.bxi.basic_actions/normal` |
 | 零力矩键 | `btn_2=1` | `wave` → `com.bxi.basic_actions/zero_torque` |
 
-组合键需要同时按下。进入状态前清空灵巧手周围空间，并确认状态机弹出的安全确认提示。进入 `wave` 后，机器人本体不会跟随行走指令；需要移动机器人时先退出该状态。
+组合键需同时按下。进入前清空灵巧手周围空间，并确认状态机弹出的安全确认提示。进入后机器人本体不跟随行走指令；需要移动机器人时先退出该状态。退出状态时节点发送 `SIGINT`，脚本执行急停、失能、恢复 MIT 参数与力矩限制后断开连接。
 
-## 直接运行播放器
+验证：日志出现 `state transition: from=com.bxi.basic_actions/normal, to=com.bxi.wuji_hand/wave`，且 `[com.bxi.wuji_hand.node.wave_driver]: started process Mod node`。
 
-直接运行适合调试手部连接和轨迹，不经过 ELF3 状态机：
+### 步骤 7：不经状态机直接运行播放器
+
+适合单独调试手部连接和轨迹：
 
 ```bash
-cd /opt/bxi/mods/com.bxi.wuji_hand
+cd <Mod 目录>
 python3 scripts/wuji_hand_wave.py \
+  --address 192.168.1.111:7447 \
   --trajectory assets/wave.npy \
   --scale 0.3 \
   --cycles 1
 ```
 
-首次运行建议使用较小幅度和单次循环。常用参数：
+首次运行使用较小幅度和单次循环，确认动作正常后再加大。常用参数：
 
 | 参数 | 默认值 | 说明 |
 | --- | ---: | --- |
 | `--address` | `192.168.1.111:7447` | Wuji Hand 2 的 UDP 地址 |
-| `--trajectory` | `assets/wave.npy` | `N×20` 的 NumPy 轨迹文件 |
+| `--trajectory` | 必填 | `N×20` 的 NumPy 轨迹文件 |
 | `--scale` | `1.5` | 相对首帧的增量缩放倍数 |
 | `--source-rate` | `100` | 原始轨迹频率，单位 Hz |
 | `--rate` | `200` | 实际命令发送频率，单位 Hz |
 | `--cycles` | `0` | 循环次数；`0` 表示持续循环 |
 
-例如指定手部地址并播放两次：
+### 步骤 8：停止与退出
 
-```bash
-python3 scripts/wuji_hand_wave.py \
-  --address 192.168.1.111:7447 \
-  --scale 0.3 \
-  --cycles 2
-```
-
-按 `Ctrl-C` 会触发 `KeyboardInterrupt`：脚本先调用 `emergency_stop()`，再关闭发布器、失能关节、恢复原来的 MIT 参数和力矩限制，最后断开 SDK 连接。
+- 脚本运行中按 `Ctrl-C`：先 `emergency_stop()`，再关闭发布器、失能关节、恢复 MIT 参数和力矩限制，最后断开 SDK 连接。
+- 状态机中退出：按 `btn_1=1` 回 `normal`（或 `btn_2=1` 进 `zero_torque`）。
+- 异常中断（如 `SIGKILL`）后清理可能不完整，重新连接前核对 MIT 参数、力矩限制和关节使能状态。
 
 ## 轨迹格式
 
@@ -211,31 +217,15 @@ python3 scripts/wuji_hand_wave.py \
 - 列顺序固定为 Wuji 关节 NID：
   `1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19, 21, 22, 23, 24`。
 
-播放器以第一帧为基准，只发送 `第一帧位置 + (当前帧 - 第一帧) × scale`，不会直接覆盖设备当前姿态。每个相邻轨迹点之间会插值，循环边界也会平滑连接。
+播放器以第一帧为基准，只发送 `第一帧位置 + (当前帧 - 第一帧) × scale`，不会直接覆盖设备当前姿态；相邻轨迹点之间插值，循环边界也平滑连接。
 
-## 安全与退出
+## 安全要求
 
 1. 首次运行使用 `--scale 0.1`～`0.3`、`--cycles 1`，并让手指远离人员、桌面和线缆。
 2. 启动前确认没有其他 Wuji SDK 程序、示例脚本或调试工具占用命令发布通道。
-3. 运行中发现异常姿态、异响、通信告警或手部失控时，立即按 `Ctrl-C`；必要时断开手部电源。
+3. 运行中出现异常姿态、异响、通信告警或手部失控时立即 `Ctrl-C`，必要时断开手部电源。
 4. 不要在 `wave` 状态中同时启动行走、全身动作或另一套灵巧手控制器。
-5. 如果进程被 `SIGKILL` 强制终止，清理代码可能来不及恢复参数；重新连接前应检查 MIT 参数、力矩限制和关节使能状态。
-
-## 故障排查
-
-| 现象 | 检查项 |
-| --- | --- |
-| `ValueError: duplicate Mod 'com.bxi.wuji_hand'` | 同一个 Mod 被部署到了两个根目录（内置 `install/share/bxi_example_py_elf3/mods/` 与 `/opt/bxi/mods`）。按“部署”一节的检查命令确认两处都在后，删除或移走多余的一份再启动；不要靠改 `mod_paths` 绕过。 |
-| `No module named wuji_sdk` | 用运行状态机的同一个 `python3` 检查 `python3 -m pip show wuji-sdk`。 |
-| `scan complete: no devices found` / `WujiException: Connection timeout` | 主机没有 `192.168.1.0/24` 的地址或路由（常见于直连网口没配 IP）。按“主机侧网络”一节配好直连网口，再用 `ip route get 192.168.1.111` 和 SDK 扫描确认。 |
-| 状态机报 `Mod node 'com.bxi.wuji_hand/wave_driver' is unavailable: ... 'wuji_sdk' is not importable with '/usr/bin/python3'` | SDK 装在别的解释器/用户目录（典型是普通用户 `~/.local`，而节点以 root + `/usr/bin/python3` 运行）。按“安装 SDK”一节装到系统级，然后重启 example。 |
-| `未检测到完整的 20 个在线关节` | 检查手部供电、网络地址、内部总线和设备型号。 |
-| `在线关节不完整` | 确认 20 个 NID 都能在诊断帧中读到，不要修改列顺序来绕过检查。 |
-| `等待关节数据超时` | 检查 SDK 连接、UDP 地址和是否已有其他订阅/发布程序。 |
-| `关节使能超时` | 程序最多等 5 s 让 20 个关节使能。先看诊断里的 `error_code_current` / `ext_state`；若同时报不可清除故障码（如 `0x3208`），先处理该故障，不要反复重试。 |
-| `0x3208 InitCurrentCalibFailed`（不可自动清除） | 启动电流采样偏置校准失败。官方处理：先给手部断电重启（power-cycle）；复现则检查电流采样通道、ADC 通路与功率级硬件。该关节无法使能时表现为 `关节使能超时`。**不要用 `clear_fault()`/`clear_all_faults()` 硬清**：该码不可清除，电流采样偏置不合法时使能会让该关节的电流/力矩估计失真。日志成片的 `Subscription for 'joint_diagnostics' lagged N messages` 只是订阅桥滞后，可用只读脚本读 `ext_state` / `error_code_current` 把真故障和流滞后区分开。 |
-| `0x3204 InitFailed`（不可自动清除） | 初始化未完成（电流校准失败或初始化步骤超时）。**断电重启后仍复现**就不是偶发锁存：按官方 resolution 检查该关节的编码器与供电，并用 `hand.export_flash_logs()` 导出设备侧初始化诊断交厂家。 |
-| 退出后参数未恢复 | 检查进程是否被强制杀死；重新运行前手动核对 MIT 参数和力矩限制。 |
+5. 不要用 `clear_fault()` / `clear_all_faults()` 绕过不可自动清除的关节故障码，也不要修改 20 关节在线校验。
 
 ## 开发与验证
 
@@ -251,7 +241,7 @@ python3 scripts/wuji_hand_wave.py \
   PY
   ```
 
-- 当前示例轨迹来自 Wuji Technology `isaaclab-sim` 提交 `67c8a36743ef12e341b9c814126aafbbd1167ac8`，上游采用 MIT License。
+- 示例轨迹来自 Wuji Technology `isaaclab-sim` 提交 `67c8a36743ef12e341b9c814126aafbbd1167ac8`，上游采用 MIT License。
 
 ## 相关资料
 
