@@ -52,6 +52,21 @@ PY
 
 ## 部署
 
+> [!warning] 两种部署方式互斥，只能选一种
+> 同一个 Mod 不能同时存在于两个 Mod 根目录。工作区内置根目录（`src/bxi_example_py_elf3/mods/`，安装后为 `install/share/bxi_example_py_elf3/mods/`）和外部根目录（状态机配置 `mod_paths`，默认示例 `/opt/bxi/mods`）各放一份时，状态机启动会直接失败，控制进程随之退出：
+>
+> ```text
+> ValueError: duplicate Mod 'com.bxi.wuji_hand': <install>/share/bxi_example_py_elf3/mods/com.bxi.wuji_hand and /opt/bxi/mods/com.bxi.wuji_hand
+> ```
+>
+> 部署前先检查另一处是否已有同名目录，只保留一份：
+>
+> ```bash
+> ls -d ./src/bxi_example_py_elf3/mods/com.bxi.wuji_hand \
+>       ./install/share/bxi_example_py_elf3/mods/com.bxi.wuji_hand \
+>       /opt/bxi/mods/com.bxi.wuji_hand 2>/dev/null
+> ```
+
 ### 作为外部 Mod 部署
 
 将仓库目录放到状态机配置中的 Mod 根目录（默认示例为 `/opt/bxi/mods`）：
@@ -77,7 +92,7 @@ test -f /opt/bxi/mods/com.bxi.wuji_hand/assets/wave.npy
 
 ### 集成到 `bxi_example_py_elf3` 源码
 
-把整个 `com.bxi.wuji_hand` 目录放入包的 `mods/` 目录，然后重新构建安装空间：
+把整个 `com.bxi.wuji_hand` 目录放入包的 `mods/` 目录，然后重新构建安装空间（**不要再按上一节 clone 到 `/opt/bxi/mods`**）：
 
 ```bash
 colcon build --packages-select bxi_example_py_elf3 --symlink-install
@@ -153,6 +168,7 @@ python3 scripts/wuji_hand_wave.py \
 
 | 现象 | 检查项 |
 | --- | --- |
+| `ValueError: duplicate Mod 'com.bxi.wuji_hand'` | 同一个 Mod 被部署到了两个根目录（内置 `install/share/bxi_example_py_elf3/mods/` 与 `/opt/bxi/mods`）。按“部署”一节的检查命令确认两处都在后，删除或移走多余的一份再启动；不要靠改 `mod_paths` 绕过。 |
 | `No module named wuji_sdk` | 用运行状态机的同一个 `python3` 检查 `python3 -m pip show wuji-sdk`。 |
 | `未检测到完整的 20 个在线关节` | 检查手部供电、网络地址、内部总线和设备型号。 |
 | `在线关节不完整` | 确认 20 个 NID 都能在诊断帧中读到，不要修改列顺序来绕过检查。 |
